@@ -150,16 +150,25 @@
 
   #rotateHint{ display:none !important; }
 
-  /* Fallback plein écran quand l'API est bloquée (Brave, etc.) */
+  /* Fallback plein écran mobile (Brave / iOS) via visualViewport */
   html.immersive, html.immersive body{
     position:fixed !important; inset:0 !important; width:100% !important;
     height:100% !important; height:100dvh !important; overflow:hidden !important;
     margin:0 !important; padding:0 !important; background:#040a0b !important;
+    touch-action:none !important;
   }
   html.immersive #game{
-    position:fixed !important; inset:0 !important; width:100vw !important; width:100dvw !important;
-    height:100vh !important; height:100dvh !important; padding:0 !important; z-index:9999 !important;
+    position:fixed !important;
+    top: var(--vvy, 0px) !important;
+    left: var(--vvx, 0px) !important;
+    width: var(--vvw, 100dvw) !important;
+    height: var(--vvh, 100dvh) !important;
+    padding:0 !important; z-index:9999 !important;
+    max-width:none !important; max-height:none !important;
   }
+  html.immersive.playing #fsBtn,
+  html.immersive.playing #muteBtn,
+  html.immersive.playing #quitBtn{ z-index:10001 !important; }
 
   @media (max-width: 720px){
     canvas{ border-width:3px; outline-offset:-5px; border-radius:4px; }
@@ -341,7 +350,26 @@
   function fsElementSafe(){
     return document.fullscreenElement || document.webkitFullscreenElement || document.msFullscreenElement || null;
   }
+  function isMobileUi(){
+    try{
+      return window.matchMedia('(pointer: coarse)').matches
+        || (navigator.maxTouchPoints > 0 && Math.min(window.innerWidth, window.innerHeight) < 900);
+    }catch(_){ return navigator.maxTouchPoints > 0; }
+  }
+  function syncVisualViewportCss(){
+    const vv = window.visualViewport;
+    const vw = (vv && vv.width) || window.innerWidth;
+    const vh = (vv && vv.height) || window.innerHeight;
+    const ox = (vv && vv.offsetLeft) || 0;
+    const oy = (vv && vv.offsetTop) || 0;
+    const root = document.documentElement;
+    root.style.setProperty('--vvw', vw + 'px');
+    root.style.setProperty('--vvh', vh + 'px');
+    root.style.setProperty('--vvx', ox + 'px');
+    root.style.setProperty('--vvy', oy + 'px');
+  }
   function applyPlayfieldLayout(){
+    syncVisualViewportCss();
     const vv = window.visualViewport;
     const vw = (vv && vv.width) || window.innerWidth;
     const vh = (vv && vv.height) || window.innerHeight;
@@ -352,6 +380,7 @@
     flappyPortrait = !!(playing && portrait);
     gameRoot.classList.toggle('playingPortrait', flappyPortrait);
     document.documentElement.classList.toggle('immersive', !!(immersiveFallback || fsElementSafe()));
+    document.documentElement.classList.toggle('playing', playing);
 
     if(flappyPortrait){
       LW = 500;
@@ -1260,6 +1289,10 @@
     running = true;
     fitCanvas();
     Music.start(currentLevelId);
+    // Mobile Brave/iOS : immersif auto (l'API plein écran ne marche souvent pas)
+    if(isMobileUi() && !fsElement() && !immersiveFallback){
+      enableImmersiveFallback(true);
+    }
     requestAnimationFrame(loop);
   }
 
@@ -1447,8 +1480,8 @@
     fsBtn.title = on ? 'Quitter le plein écran' : 'Plein écran';
     fsBtn.setAttribute('aria-label', fsBtn.title);
     if(fsMenuBtn) fsMenuBtn.textContent = on ? '🗗 QUITTER PLEIN ÉCRAN' : '⛶ PLEIN ÉCRAN';
-    // iOS / navigateurs sans API : on laisse le bouton (tente quand même / no-op soft)
-    if(!canFullscreen() && !on){
+    // iOS / navigateurs sans API : sur mobile le bouton sert au mode immersif
+    if(!canFullscreen() && !on && !isMobileUi()){
       fsBtn.style.opacity = '0.55';
       if(fsMenuBtn) fsMenuBtn.style.opacity = '0.7';
     } else {
@@ -1456,23 +1489,30 @@
       if(fsMenuBtn) fsMenuBtn.style.opacity = '';
     }
   }
-  function enableImmersiveFallback(){
+  function enableImmersiveFallback(quiet){
     immersiveFallback = true;
+    syncVisualViewportCss();
     document.documentElement.classList.add('immersive');
     try{ window.scrollTo(0, 1); }catch(_){}
-    const toast = document.getElementById('recordToast');
-    if(toast){
-      const prev = toast.textContent;
-      toast.textContent = 'Mode immersif (Brave) — barre d\'adresse peut rester';
-      toast.classList.remove('hidden');
-      toast.classList.add('show');
-      setTimeout(()=>{ toast.classList.remove('show'); toast.textContent = prev; }, 2200);
+    try{ if(screen.orientation && screen.orientation.lock) screen.orientation.lock('portrait').catch(()=>{}); }catch(_){}
+    if(!quiet){
+      const toast = document.getElementById('recordToast');
+      if(toast){
+        const prev = toast.textContent;
+        toast.textContent = isMobileUi()
+          ? 'Mode immersif mobile activé'
+          : 'Mode immersif — barre navigateur possible';
+        toast.classList.remove('hidden');
+        toast.classList.add('show');
+        setTimeout(()=>{ toast.classList.remove('show'); toast.textContent = prev; }, 1800);
+      }
     }
     syncFsUi(); fitCanvas();
   }
   function disableImmersiveFallback(){
     immersiveFallback = false;
     document.documentElement.classList.remove('immersive');
+    try{ if(screen.orientation && screen.orientation.unlock) screen.orientation.unlock(); }catch(_){}
     syncFsUi(); fitCanvas();
   }
   function toggleFullscreen(e){
@@ -1500,11 +1540,28 @@
       return false;
     }
 
+    // Téléphone / Brave mobile : l'API plein écran est souvent refusée → immersif direct
+    if(isMobileUi()){
+      enableImmersiveFallback(false);
+      // Tentative API en parallèle (Android Brave parfois OK)
+      const el = document.documentElement;
+      const req = el.requestFullscreen || el.webkitRequestFullscreen;
+      if(req){
+        try{
+          Promise.resolve(req.call(el)).then(()=>{
+            immersiveFallback = false;
+            document.documentElement.classList.add('immersive');
+            done();
+          }).catch(()=>{});
+        }catch(_){}
+      }
+      return false;
+    }
+
     const candidates = [document.documentElement, document.body, document.getElementById('game'), canvas].filter(Boolean);
     (function tryNext(i){
       if(i >= candidates.length){
-        // Brave / iOS : API refusée → mode immersif CSS (plein viewport)
-        enableImmersiveFallback();
+        enableImmersiveFallback(false);
         return;
       }
       reqFs(candidates[i]).then(()=>{
