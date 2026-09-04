@@ -1176,6 +1176,8 @@
     activePointerId = e.pointerId;
     try{ gameEl.setPointerCapture(e.pointerId); }catch(_){}
     e.preventDefault();
+    const sel = window.getSelection && window.getSelection();
+    if(sel && sel.removeAllRanges) sel.removeAllRanges();
     pressInput();
   }, {passive:false});
   function endPointer(e){
