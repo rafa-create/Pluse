@@ -7,6 +7,9 @@
 <meta name="mobile-web-app-capable" content="yes">
 <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
 <meta name="theme-color" content="#040a0b">
+<link rel="icon" href="favicon.svg" type="image/svg+xml">
+<link rel="icon" href="favicon.png" type="image/png" sizes="512x512">
+<link rel="apple-touch-icon" href="favicon.png">
 <title>PULSE — LE DRAGON DES CIEUX</title>
 <link rel="preconnect" href="https://fonts.googleapis.com">
 <link href="https://fonts.googleapis.com/css2?family=Cinzel+Decorative:wght@700;900&family=MedievalSharp&display=swap" rel="stylesheet">
@@ -68,7 +71,7 @@
   #scoreTag.ahead{ color:var(--moss-bright); text-shadow:0 0 10px rgba(61,255,160,0.85); }
   #deaths{color:#ff6a6a; font-weight:bold;}
   #statusTag{color:var(--moss-bright); font-weight:bold; min-width:150px; text-align:right; font-size:12.5px;}
-  #quitBtn,#fsBtn{position:absolute; top:calc(14px + var(--safe-top)); z-index:12;
+  #quitBtn,#fsBtn,#muteBtn{position:absolute; top:calc(14px + var(--safe-top)); z-index:12;
        width:44px; height:44px; border-radius:50%;
        border:2px solid rgba(61,255,160,0.6); background:radial-gradient(circle,#0d211f,#020706); color:var(--parchment); font-size:16px;
        cursor:pointer; display:flex; align-items:center; justify-content:center; font-family:'MedievalSharp',serif;
@@ -76,9 +79,12 @@
        touch-action:manipulation; -webkit-tap-highlight-color:transparent;}
   #quitBtn{ right:calc(14px + var(--safe-right)); }
   #fsBtn{ left:calc(14px + var(--safe-left)); }
+  #muteBtn{ left:calc(66px + var(--safe-left)); }
   #quitBtn:hover{background:radial-gradient(circle,#3a0a1c,#150307); border-color:var(--blood); box-shadow:0 0 16px rgba(255,61,106,0.5);}
   #fsBtn:hover{background:radial-gradient(circle,#0d2a28,#021210); border-color:var(--cyan); box-shadow:0 0 16px rgba(44,232,255,0.45);}
+  #muteBtn:hover{background:radial-gradient(circle,#0d2a28,#021210); border-color:var(--gold); box-shadow:0 0 16px rgba(255,215,106,0.4);}
   #fsBtn.fsActive{ border-color:var(--moss-bright); color:var(--moss-bright); }
+  #muteBtn.muted{ border-color:#886; color:#886; opacity:0.75; }
 
   .overlay{position:absolute; inset:0; display:flex; flex-direction:column; align-items:center; justify-content:center;
            background:
@@ -151,9 +157,10 @@
     #levelName{ min-width:0; }
     #statusTag{ min-width:0; font-size:10.5px; max-width:28vw; overflow:hidden; text-overflow:ellipsis; white-space:nowrap; }
     #progressWrap{ margin:0 8px; height:8px; min-width:60px; }
-    #quitBtn,#fsBtn{ width:40px; height:40px; top:calc(8px + var(--safe-top)); }
+    #quitBtn,#fsBtn,#muteBtn{ width:40px; height:40px; top:calc(8px + var(--safe-top)); }
     #quitBtn{ right:calc(8px + var(--safe-right)); }
     #fsBtn{ left:calc(8px + var(--safe-left)); }
+    #muteBtn{ left:calc(56px + var(--safe-left)); }
     .overlay{ gap:12px; justify-content:flex-start; padding-top:max(20px, calc(12px + var(--safe-top))); }
     .controls, .legend{ font-size:11px; }
     .controls span, .legend span{ width:100%; text-align:left; }
@@ -181,7 +188,7 @@
     }
     #game.playingPortrait #hud{
       position:absolute; top:calc(10px + var(--safe-top));
-      width: calc(100% - 96px); left: 48px; transform:none; padding:0 4px;
+      width: calc(100% - 148px); left: 96px; transform:none; padding:0 4px;
       display:grid; grid-template-columns: 1fr auto; grid-template-rows: auto auto; gap:4px 8px;
       z-index:6;
     }
@@ -200,6 +207,11 @@
       left: calc(10px + var(--safe-left));
       z-index:7;
     }
+    #game.playingPortrait #muteBtn{
+      top: calc(10px + var(--safe-top));
+      left: calc(58px + var(--safe-left));
+      z-index:7;
+    }
     #game.playingPortrait #deathFlash{ z-index:5; }
   }
 </style>
@@ -210,6 +222,7 @@
   <div id="deathFlash"></div>
 
   <button id="fsBtn" title="Plein écran" aria-label="Plein écran">⛶</button>
+  <button id="muteBtn" title="Couper la musique" aria-label="Musique">♪</button>
   <button id="quitBtn" class="hidden" title="Retour au menu">✕</button>
 
   <div id="hud" class="hidden">
@@ -359,6 +372,144 @@
     window.visualViewport.addEventListener('scroll', fitCanvas);
   }
   fitCanvas();
+
+  // ---------- MUSIQUE MÉDIÉVALE PROCÉDURALE (par niveau) ----------
+  const Music = (function(){
+    let ctx=null, master=null, playing=false, muted=false, timer=null, step=0, theme=null;
+    const THEMES = {
+      story1: { name:'Premier envol', bpm:78, root:62, scale:[0,2,3,5,7,9,10], drone:true, dens:0.55, bright:0.35 },
+      story2: { name:'Rune d\'élan', bpm:96, root:64, scale:[0,2,4,5,7,9,10], drone:true, dens:0.7, bright:0.55 },
+      story3: { name:'Souffle & givre', bpm:88, root:60, scale:[0,2,3,5,7,8,10], drone:true, dens:0.65, bright:0.4 },
+      story4: { name:'Sylve & ténèbres', bpm:84, root:57, scale:[0,2,3,5,7,8,10], drone:true, dens:0.6, bright:0.25 },
+      story5: { name:'Épreuve du dragon', bpm:108, root:55, scale:[0,2,3,5,7,8,11], drone:true, dens:0.85, bright:0.5 },
+      arcade: { name:'Arcade', bpm:118, root:62, scale:[0,2,4,5,7,9,11], drone:false, dens:0.9, bright:0.65 },
+      full:   { name:'Grande chevauchée', bpm:100, root:58, scale:[0,2,3,5,7,9,10], drone:true, dens:0.75, bright:0.45 },
+      dash:   { name:'Élan', bpm:112, root:65, scale:[0,2,4,7,9], drone:false, dens:0.8, bright:0.7 },
+      mirror: { name:'Double spectral', bpm:90, root:67, scale:[0,2,4,6,7,9,11], drone:true, dens:0.5, bright:0.6 },
+      wind:   { name:'Souffle ardent', bpm:102, root:60, scale:[0,2,4,5,7,9,10], drone:true, dens:0.7, bright:0.55 },
+      invert: { name:'Givre', bpm:76, root:71, scale:[0,1,3,5,7,8,10], drone:true, dens:0.45, bright:0.75 },
+      hmirror:{ name:'Sylve', bpm:92, root:59, scale:[0,2,3,5,7,9,10], drone:true, dens:0.6, bright:0.4 }
+    };
+    function ensure(){
+      if(ctx) return;
+      const AC = window.AudioContext || window.webkitAudioContext;
+      if(!AC) return;
+      ctx = new AC();
+      master = ctx.createGain();
+      master.gain.value = 0.0001;
+      master.connect(ctx.destination);
+    }
+    function midiToFreq(m){ return 440 * Math.pow(2, (m-69)/12); }
+    function tone(freq, t0, dur, type, gain, filt){
+      if(!ctx || muted) return;
+      const o = ctx.createOscillator();
+      const g = ctx.createGain();
+      o.type = type || 'triangle';
+      o.frequency.setValueAtTime(freq, t0);
+      g.gain.setValueAtTime(0.0001, t0);
+      g.gain.exponentialRampToValueAtTime(Math.max(0.001, gain), t0+0.02);
+      g.gain.exponentialRampToValueAtTime(0.0001, t0+dur);
+      if(filt){
+        const f = ctx.createBiquadFilter();
+        f.type = 'lowpass';
+        f.frequency.value = filt;
+        o.connect(f); f.connect(g); g.connect(master);
+      } else { o.connect(g); g.connect(master); }
+      o.start(t0); o.stop(t0+dur+0.02);
+    }
+    function pluck(freq, t0, dur, gain){
+      tone(freq, t0, dur, 'triangle', gain*0.7, 1800);
+      tone(freq*2.005, t0, dur*0.55, 'sine', gain*0.22, 2200);
+    }
+    function droneHit(midi, t0){
+      const f = midiToFreq(midi);
+      tone(f, t0, 1.8, 'sine', 0.045, 600);
+      tone(f*1.5, t0, 1.6, 'sine', 0.02, 800);
+    }
+    function drum(t0, soft){
+      if(!ctx || muted) return;
+      const o = ctx.createOscillator();
+      const g = ctx.createGain();
+      o.type = 'sine';
+      o.frequency.setValueAtTime(soft?90:140, t0);
+      o.frequency.exponentialRampToValueAtTime(40, t0+0.12);
+      g.gain.setValueAtTime(soft?0.04:0.07, t0);
+      g.gain.exponentialRampToValueAtTime(0.0001, t0+0.14);
+      o.connect(g); g.connect(master);
+      o.start(t0); o.stop(t0+0.16);
+    }
+    function scheduleBar(){
+      if(!playing || !ctx || !theme) return;
+      const bpm = theme.bpm;
+      const beat = 60/bpm;
+      const t0 = ctx.currentTime + 0.05;
+      const scale = theme.scale;
+      const root = theme.root;
+      // bourdon
+      if(theme.drone && step%4===0) droneHit(root-12, t0);
+      // rythme (tambour sourd)
+      drum(t0, false);
+      if(theme.dens>0.6) drum(t0+beat*2, true);
+      if(theme.dens>0.8) drum(t0+beat*1.5, true);
+      // mélodie type mode médiéval
+      const patternLen = 8;
+      for(let i=0;i<patternLen;i++){
+        if(Math.random() > theme.dens) continue;
+        const deg = scale[(step*3 + i*2 + Math.floor(Math.random()*2)) % scale.length];
+        const oct = (i%5===0 ? 12 : 0) + (theme.bright>0.5 && i%7===0 ? 12 : 0);
+        const note = root + deg + oct;
+        const when = t0 + i*(beat/2);
+        const dur = beat * (0.35 + Math.random()*0.45);
+        const g = 0.045 + theme.bright*0.03;
+        pluck(midiToFreq(note), when, dur, g);
+        // réponse en quinte (organum)
+        if(theme.drone && i%2===0) pluck(midiToFreq(note+7), when+0.01, dur*0.9, g*0.45);
+      }
+      step++;
+      timer = setTimeout(scheduleBar, beat*4*1000);
+    }
+    function setMaster(v){
+      if(!master || !ctx) return;
+      const now = ctx.currentTime;
+      master.gain.cancelScheduledValues(now);
+      master.gain.setValueAtTime(master.gain.value, now);
+      master.gain.linearRampToValueAtTime(v, now+0.25);
+    }
+    function start(levelId){
+      ensure();
+      if(!ctx) return;
+      theme = THEMES[levelId] || THEMES.full;
+      if(ctx.state==='suspended') ctx.resume();
+      stopTimers();
+      playing = true; step = 0;
+      if(!muted) setMaster(0.55);
+      scheduleBar();
+    }
+    function stopTimers(){ if(timer){ clearTimeout(timer); timer=null; } }
+    function stop(){
+      playing = false;
+      stopTimers();
+      setMaster(0.0001);
+    }
+    function setMuted(m){
+      muted = !!m;
+      try{ localStorage.setItem('pulseMuted', muted?'1':'0'); }catch(_){}
+      if(muted) setMaster(0.0001);
+      else if(playing){ ensure(); if(ctx.state==='suspended') ctx.resume(); setMaster(0.55); }
+      syncMuteUi();
+    }
+    function toggleMute(){ setMuted(!muted); }
+    function syncMuteUi(){
+      const btn = document.getElementById('muteBtn');
+      if(!btn) return;
+      btn.classList.toggle('muted', muted);
+      btn.textContent = muted ? '🔇' : '♪';
+      btn.title = muted ? 'Activer la musique' : 'Couper la musique';
+      btn.setAttribute('aria-label', btn.title);
+    }
+    try{ muted = localStorage.getItem('pulseMuted')==='1'; }catch(_){}
+    return { start, stop, toggleMute, syncMuteUi, isMuted:()=>muted };
+  })();
 
   // ---------- HELPERS DE CONSTRUCTION DE NIVEAU ----------
   // Chaque obstacle est placé à une position absolue via un curseur "cx" qui
@@ -1016,6 +1167,7 @@
 
   function returnToMenu(){
     running = false;
+    Music.stop();
     document.getElementById('winScreen').classList.add('hidden');
     document.getElementById('hud').classList.add('hidden');
     document.getElementById('quitBtn').classList.add('hidden');
@@ -1050,6 +1202,7 @@
     resetGame();
     running = true;
     fitCanvas();
+    Music.start(currentLevelId);
     requestAnimationFrame(loop);
   }
 
@@ -1138,6 +1291,7 @@
     document.getElementById('winBestLine').classList.toggle('hidden', best<=0);
     document.getElementById('winBest').textContent = best.toFixed(2)+'s';
     document.getElementById('winScreen').classList.remove('hidden');
+    Music.stop();
     fitCanvas();
   }
 
@@ -1162,7 +1316,7 @@
       && document.getElementById('winScreen').classList.contains('hidden');
   }
   function isUiTarget(t){
-    return !!(t && t.closest && t.closest('button, a, input, .overlay:not(.hidden), #quitBtn, #fsBtn'));
+    return !!(t && t.closest && t.closest('button, a, input, .overlay:not(.hidden), #quitBtn, #fsBtn, #muteBtn'));
   }
 
   window.addEventListener('keydown', e=>{ if(e.code==='Space'){ e.preventDefault(); pressInput(); } });
@@ -1261,6 +1415,11 @@
   }
   fsBtn.addEventListener('click', e=>{ e.stopPropagation(); toggleFullscreen(); });
   if(fsMenuBtn) fsMenuBtn.addEventListener('click', e=>{ e.stopPropagation(); toggleFullscreen(); });
+  document.getElementById('muteBtn').addEventListener('click', e=>{
+    e.stopPropagation();
+    Music.toggleMute();
+  });
+  Music.syncMuteUi();
   ['fullscreenchange','webkitfullscreenchange','MSFullscreenChange'].forEach(ev=>{
     document.addEventListener(ev, ()=>{ syncFsUi(); fitCanvas(); });
   });
