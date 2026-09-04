@@ -37,6 +37,19 @@
     overflow:hidden; font-family:'MedievalSharp',serif;
     touch-action:none; -webkit-tap-highlight-color:transparent;
     overscroll-behavior:none;
+    -webkit-user-select:none; user-select:none;
+    -webkit-touch-callout:none; -webkit-user-drag:none;
+  }
+  #game, #game *{
+    -webkit-user-select:none !important; user-select:none !important;
+    -webkit-touch-callout:none !important;
+    -webkit-user-drag:none;
+  }
+  .overlay, .overlay *{
+    -webkit-user-select:text; user-select:text; /* menus : sélection OK si besoin */
+  }
+  .overlay button, .overlay .btn, #quitBtn{
+    -webkit-user-select:none !important; user-select:none !important;
   }
   #game{
     position:relative; width:100vw; width:100dvw; height:100vh; height:100dvh;
@@ -1173,6 +1186,19 @@
   gameEl.addEventListener('pointerup', endPointer);
   gameEl.addEventListener('pointercancel', endPointer);
   gameEl.addEventListener('lostpointercapture', ()=>{ activePointerId = null; releaseInput(); });
+
+  // Empêche sélection / menu contextuel au long appui (surtout mobile)
+  document.addEventListener('contextmenu', e=>{
+    if(isGameplayActive() || e.target === canvas || e.target === touchPad || (e.target && e.target.closest && e.target.closest('#touchPad,#c,#game'))){
+      e.preventDefault();
+    }
+  });
+  document.addEventListener('selectstart', e=>{
+    if(isGameplayActive() || (e.target && e.target.closest && e.target.closest('#touchPad,#c,#hud,#game'))){
+      e.preventDefault();
+    }
+  });
+  document.addEventListener('dragstart', e=> e.preventDefault());
 
   // Empêche le zoom / le scroll pendant une partie
   document.addEventListener('gesturestart', e=> e.preventDefault(), {passive:false});
