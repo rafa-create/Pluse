@@ -1,0 +1,21 @@
+{
+  "name": "pulse",
+  "version": "1.0.0",
+  "description": "PULSE — Le Dragon des Cieux",
+  "scripts": {
+    "sync": "node -e \"require('fs').copyFileSync('index.html','www/index.html')\" && npx cap sync android",
+    "open:android": "npx cap open android"
+  },
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/rafa-create/Pluse.git"
+  },
+  "author": "",
+  "license": "ISC",
+  "homepage": "https://rafa-create.github.io/Pluse/",
+  "dependencies": {
+    "@capacitor/android": "^8.2.0",
+    "@capacitor/cli": "^8.2.0",
+    "@capacitor/core": "^8.2.0"
+  }
+}
