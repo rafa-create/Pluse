@@ -150,6 +150,17 @@
 
   #rotateHint{ display:none !important; }
 
+  /* Fallback plein écran quand l'API est bloquée (Brave, etc.) */
+  html.immersive, html.immersive body{
+    position:fixed !important; inset:0 !important; width:100% !important;
+    height:100% !important; height:100dvh !important; overflow:hidden !important;
+    margin:0 !important; padding:0 !important; background:#040a0b !important;
+  }
+  html.immersive #game{
+    position:fixed !important; inset:0 !important; width:100vw !important; width:100dvw !important;
+    height:100vh !important; height:100dvh !important; padding:0 !important; z-index:9999 !important;
+  }
+
   @media (max-width: 720px){
     canvas{ border-width:3px; outline-offset:-5px; border-radius:4px; }
     #hud{ font-size:11px; letter-spacing:0.4px; top:calc(8px + var(--safe-top)); gap:4px; flex-wrap:wrap; row-gap:6px; }
@@ -246,7 +257,7 @@
       <span><b>Maintien</b> → le dragon s'élève</span>
       <span><b>Relâche</b> → le dragon plonge</span>
       <span class="desktopOnly">Les murailles sont mortelles, le sol et les voûtes sont sûrs (on peut y glisser)</span>
-      <span><b>Téléphone</b> → plein écran en vertical, maintiens n'importe où</span>
+      <span><b>Téléphone</b> → portrait Flappy plein écran (sans écrasement)</span>
     </div>
 
     <div class="legend">
@@ -320,11 +331,17 @@
 (function(){
   const canvas = document.getElementById('c');
   const ctx = canvas.getContext('2d');
-  const LW = 900, LH = 400; // résolution logique
-  const floorY = 350, ceilY = 50;
+  // Réf. paysage. En portrait : playfield haut type Flappy (ratio écran, sans condensation).
+  const BASE_LW = 900, BASE_LH = 400, BASE_FLOOR = 350, BASE_CEIL = 50;
+  let LW = BASE_LW, LH = BASE_LH, floorY = BASE_FLOOR, ceilY = BASE_CEIL;
+  let yScalePhys = 1, playerScreenX = 180;
   let flappyPortrait = false;
+  let immersiveFallback = false;
 
-  function fitCanvas(){
+  function fsElementSafe(){
+    return document.fullscreenElement || document.webkitFullscreenElement || document.msFullscreenElement || null;
+  }
+  function applyPlayfieldLayout(){
     const vv = window.visualViewport;
     const vw = (vv && vv.width) || window.innerWidth;
     const vh = (vv && vv.height) || window.innerHeight;
@@ -334,9 +351,29 @@
     const gameRoot = document.getElementById('game');
     flappyPortrait = !!(playing && portrait);
     gameRoot.classList.toggle('playingPortrait', flappyPortrait);
+    document.documentElement.classList.toggle('immersive', !!(immersiveFallback || fsElementSafe()));
 
     if(flappyPortrait){
-      // Plein écran : buffer = viewport, rendu à ratio conservé (pas d'écrasement)
+      LW = 500;
+      LH = Math.round(LW * (vh / Math.max(1, vw)));
+      LH = Math.max(720, Math.min(LH, 1200));
+      ceilY = Math.round(LH * 0.08);
+      floorY = Math.round(LH * 0.92);
+      yScalePhys = (floorY - ceilY) / (BASE_FLOOR - BASE_CEIL);
+      playerScreenX = Math.round(LW * 0.20);
+    } else {
+      LW = BASE_LW; LH = BASE_LH; floorY = BASE_FLOOR; ceilY = BASE_CEIL;
+      yScalePhys = 1; playerScreenX = 180;
+    }
+  }
+  function fitCanvas(){
+    applyPlayfieldLayout();
+    const vv = window.visualViewport;
+    const vw = (vv && vv.width) || window.innerWidth;
+    const vh = (vv && vv.height) || window.innerHeight;
+    const portrait = vh > vw;
+
+    if(flappyPortrait){
       canvas.style.width = '100%';
       canvas.style.height = '100%';
       const dpr = Math.min(window.devicePixelRatio || 1, 2.5);
@@ -349,9 +386,9 @@
       return;
     }
 
-    if(canvas.width !== LW || canvas.height !== LH){
-      canvas.width = LW;
-      canvas.height = LH;
+    if(canvas.width !== BASE_LW || canvas.height !== BASE_LH){
+      canvas.width = BASE_LW;
+      canvas.height = BASE_LH;
     }
     let maxW, maxH;
     if(portrait){
@@ -372,6 +409,24 @@
     window.visualViewport.addEventListener('scroll', fitCanvas);
   }
   fitCanvas();
+
+  function runInBaseCoords(fn){
+    const snap = {LW, LH, floorY, ceilY};
+    LW = BASE_LW; LH = BASE_LH; floorY = BASE_FLOOR; ceilY = BASE_CEIL;
+    try{ return fn(); }
+    finally{ LW = snap.LW; LH = snap.LH; floorY = snap.floorY; ceilY = snap.ceilY; }
+  }
+  function remapObjY(o){
+    if(yScalePhys === 1) return o;
+    const mapY = y => ceilY + (y - BASE_CEIL) * yScalePhys;
+    const mapH = h => h * yScalePhys;
+    if(o.y != null) o.y = mapY(o.y);
+    if(o.h != null) o.h = mapH(o.h);
+    if(o.gapTop != null) o.gapTop = mapY(o.gapTop);
+    if(o.gapH != null) o.gapH = mapH(o.gapH);
+    return o;
+  }
+  function remapLevelY(arr){ arr.forEach(remapObjY); return arr; }
 
   // ---------- MUSIQUE MÉDIÉVALE PROCÉDURALE (par niveau) ----------
   const Music = (function(){
@@ -1133,7 +1188,7 @@
 
   // ---------- JOUEUR ----------
   const START = ()=>({
-    x:0, y:(floorY+ceilY)/2-10, w:30, h:20, vy:0,
+    x:0, y:(floorY+ceilY)/2-Math.round(10*yScalePhys), w:Math.round(30*Math.min(1.35,0.85+yScalePhys*0.15)), h:Math.round(20*Math.min(1.35,0.85+yScalePhys*0.15)), vy:0,
     vertInvert:1,      // 1 = normal, -1 = commandes verticales inversées
     hMirror:false,     // affichage en miroir horizontal
     mirrorActive:false,// vaisseau miroir actif
@@ -1168,6 +1223,8 @@
   function returnToMenu(){
     running = false;
     Music.stop();
+    immersiveFallback = false;
+    document.documentElement.classList.remove('immersive');
     document.getElementById('winScreen').classList.add('hidden');
     document.getElementById('hud').classList.add('hidden');
     document.getElementById('quitBtn').classList.add('hidden');
@@ -1207,7 +1264,9 @@
   }
 
   function resetGame(){
-    const built = LEVELS[currentLevelId].build();
+    applyPlayfieldLayout();
+    const built = runInBaseCoords(()=> LEVELS[currentLevelId].build());
+    remapLevelY(built.level);
     level = built.level;
     LEVEL_END = built.length;
     arcadeCursor = built.arcadeCursor || 0;
@@ -1231,7 +1290,7 @@
     deaths++;
     shake = 12;
     for(let i=0;i<18;i++){
-      particles.push({x:player.x-camX+180, y:player.y+player.h/2, vx:(Math.random()-0.5)*8, vy:(Math.random()-0.5)*8, life:28, col: pickColor()});
+      particles.push({x:player.x-camX+playerScreenX, y:player.y+player.h/2, vx:(Math.random()-0.5)*8, vy:(Math.random()-0.5)*8, life:28, col: pickColor()});
     }
     const flash = document.getElementById('deathFlash');
     flash.style.opacity = '0.55';
@@ -1382,7 +1441,7 @@
     return !!(el.requestFullscreen || el.webkitRequestFullscreen || el.webkitRequestFullScreen || el.msRequestFullscreen);
   }
   function syncFsUi(){
-    const on = !!fsElement();
+    const on = !!(fsElement() || immersiveFallback);
     fsBtn.classList.toggle('fsActive', on);
     fsBtn.textContent = on ? '🗗' : '⛶';
     fsBtn.title = on ? 'Quitter le plein écran' : 'Plein écran';
@@ -1397,6 +1456,25 @@
       if(fsMenuBtn) fsMenuBtn.style.opacity = '';
     }
   }
+  function enableImmersiveFallback(){
+    immersiveFallback = true;
+    document.documentElement.classList.add('immersive');
+    try{ window.scrollTo(0, 1); }catch(_){}
+    const toast = document.getElementById('recordToast');
+    if(toast){
+      const prev = toast.textContent;
+      toast.textContent = 'Mode immersif (Brave) — barre d\'adresse peut rester';
+      toast.classList.remove('hidden');
+      toast.classList.add('show');
+      setTimeout(()=>{ toast.classList.remove('show'); toast.textContent = prev; }, 2200);
+    }
+    syncFsUi(); fitCanvas();
+  }
+  function disableImmersiveFallback(){
+    immersiveFallback = false;
+    document.documentElement.classList.remove('immersive');
+    syncFsUi(); fitCanvas();
+  }
   function toggleFullscreen(e){
     if(e){ e.preventDefault(); e.stopPropagation(); }
     const doc = document;
@@ -1408,34 +1486,31 @@
     const reqFs = (el)=>{
       const req = el.requestFullscreen || el.webkitRequestFullscreen || el.webkitRequestFullScreen || el.msRequestFullscreen || el.mozRequestFullScreen;
       if(!req) return Promise.reject(new Error('unsupported'));
-      // Important Brave/Chromium : ne PAS passer d'options (navigationUI casse souvent la requête)
       try { return Promise.resolve(req.call(el)); } catch(err){ return Promise.reject(err); }
     };
-
     const done = ()=> setTimeout(()=>{ syncFsUi(); fitCanvas(); }, 60);
 
+    // Déjà en fallback immersif → quitter
+    if(immersiveFallback && !fsElement()){
+      disableImmersiveFallback();
+      return false;
+    }
     if(fsElement()){
       exitFs().then(done).catch(done);
       return false;
     }
 
-    // Ordre de fallback : html → body → #game (Brave préfère souvent documentElement)
-    const candidates = [document.documentElement, document.body, document.getElementById('game')].filter(Boolean);
+    const candidates = [document.documentElement, document.body, document.getElementById('game'), canvas].filter(Boolean);
     (function tryNext(i){
       if(i >= candidates.length){
-        // Dernier recours : feedback visible
-        const toast = document.getElementById('recordToast');
-        if(toast){
-          const prev = toast.textContent;
-          toast.textContent = 'Plein écran bloqué par le navigateur';
-          toast.classList.remove('hidden');
-          toast.classList.add('show');
-          setTimeout(()=>{ toast.classList.remove('show'); toast.textContent = prev; }, 1800);
-        }
-        done();
+        // Brave / iOS : API refusée → mode immersif CSS (plein viewport)
+        enableImmersiveFallback();
         return;
       }
-      reqFs(candidates[i]).then(done).catch(()=> tryNext(i+1));
+      reqFs(candidates[i]).then(()=>{
+        immersiveFallback = false;
+        done();
+      }).catch(()=> tryNext(i+1));
     })(0);
     return false;
   }
@@ -1528,28 +1603,32 @@
 
     if(LEVEL_END===Infinity){
       // mode Arcade : génère la suite au fur et à mesure et purge ce qui est loin derrière
-      while(arcadeCursor < player.x + 2400){ arcadeCursor = generateArcadeChunk(level, arcadeCursor, elapsed); }
+      while(arcadeCursor < player.x + 2400){
+        const before = level.length;
+        arcadeCursor = runInBaseCoords(()=> generateArcadeChunk(level, arcadeCursor, elapsed));
+        for(let i=before;i<level.length;i++) remapObjY(level[i]);
+      }
       if(level.length > 400){ level = level.filter(o=> (o.x+(o.w||34)) > player.x-1200); }
     } else if(player.x >= LEVEL_END){ win(); return; }
 
     // physique du vaisseau (gravité + poussée), affectées par l'inversion verticale
-    player.vy += G_SHIP * player.vertInvert * dt;
-    if(inputHeld) player.vy -= SHIP_THRUST * player.vertInvert * dt;
+    player.vy += G_SHIP * yScalePhys * player.vertInvert * dt;
+    if(inputHeld) player.vy -= SHIP_THRUST * yScalePhys * player.vertInvert * dt;
 
     // courants d'air : force additionnelle tant que le joueur est dans la zone
     for(const o of level){
       if(o.type!=='wind') continue;
       if(o.x > player.x+260 || o.x+o.w < player.x-60) continue;
       if(player.x+player.w > o.x && player.x < o.x+o.w){
-        player.vy += o.strength * o.dir * dt;
+        player.vy += o.strength * yScalePhys * o.dir * dt;
       }
     }
 
-    if(Math.abs(player.vy) > MAX_SHIP) player.vy = MAX_SHIP*Math.sign(player.vy);
+    if(Math.abs(player.vy) > MAX_SHIP*yScalePhys) player.vy = MAX_SHIP*yScalePhys*Math.sign(player.vy);
     const prevY = player.y;
     player.y += player.vy * dt;
 
-    trail.push({x:player.x-camX+180-player.w/2, y:player.y+player.h/2});
+    trail.push({x:player.x-camX+playerScreenX-player.w/2, y:player.y+player.h/2});
     if(trail.length>14) trail.shift();
 
     // sol / plafond : jamais mortels, on glisse dessus
@@ -1581,7 +1660,7 @@
           player.x += DASH_BOOST; camX += DASH_BOOST;
           shake = Math.max(shake,6);
           for(let i=0;i<10;i++){
-            particles.push({x:180-Math.random()*20, y:player.y+player.h/2, vx:-(Math.random()*4+3), vy:(Math.random()-0.5)*3, life:18, col:'#ffe14d'});
+            particles.push({x:playerScreenX-Math.random()*20, y:player.y+player.h/2, vx:-(Math.random()*4+3), vy:(Math.random()-0.5)*3, life:18, col:'#ffe14d'});
           }
         }
       } else if(o.type==='portal'){
@@ -1774,25 +1853,14 @@
   }
 
   function draw(){
-    // Portrait plein écran : ratio conservé (largeur max) + bandes grotte
+    // Portrait Flappy : playfield au ratio écran → scale uniforme = plein écran, zéro condensation
     if(flappyPortrait){
       ctx.setTransform(1, 0, 0, 1, 0, 0);
       ctx.fillStyle = '#040a0b';
       ctx.fillRect(0, 0, canvas.width, canvas.height);
-      // Remplir la largeur (meilleure lisibilité horizontale), centrer verticalement
-      const s = canvas.width / LW;
-      const drawH = LH * s;
-      const ox0 = 0;
-      const oy0 = Math.max(0, (canvas.height - drawH) / 2);
-      // Décor des bandes haut/bas
-      if(oy0 > 0){
-        const g1 = ctx.createLinearGradient(0, 0, 0, oy0);
-        g1.addColorStop(0, '#020506'); g1.addColorStop(1, '#0a1f1c');
-        ctx.fillStyle = g1; ctx.fillRect(0, 0, canvas.width, oy0);
-        const g2 = ctx.createLinearGradient(0, oy0+drawH, 0, canvas.height);
-        g2.addColorStop(0, '#0a1f1c'); g2.addColorStop(1, '#020506');
-        ctx.fillStyle = g2; ctx.fillRect(0, oy0+drawH, canvas.width, canvas.height-(oy0+drawH));
-      }
+      const s = Math.min(canvas.width / LW, canvas.height / LH);
+      const ox0 = (canvas.width - LW * s) / 2;
+      const oy0 = (canvas.height - LH * s) / 2;
       ctx.setTransform(s, 0, 0, s, ox0, oy0);
     } else {
       ctx.setTransform(1, 0, 0, 1, 0, 0);
@@ -1801,7 +1869,7 @@
     let ox=0, oy=0;
     if(shake>0){ ox=(Math.random()-0.5)*shake; oy=(Math.random()-0.5)*shake; shake*=0.85; if(shake<0.5)shake=0; }
     const t = performance.now();
-    const camOffset = camX - 180;
+    const camOffset = camX - playerScreenX;
 
     // ---- PLAN 1 : ARRIÈRE-PLAN (aucune hitbox) ----
     ctx.save();
@@ -2042,7 +2110,7 @@
     if(player.mirrorActive){
       const mY = ceilY+floorY-player.y-player.h;
       ctx.save();
-      ctx.translate(180, mY+player.h/2);
+      ctx.translate(playerScreenX, mY+player.h/2);
       ctx.scale(1,-1);
       ctx.globalAlpha = 0.75;
       ctx.shadowColor = '#8ff5ff'; ctx.shadowBlur = 18;
@@ -2055,7 +2123,7 @@
     }
 
     // dragon (vaisseau principal) : silhouette ailée or et braise, avec liseré lumineux
-    const drawX = 180, drawY = player.y;
+    const drawX = playerScreenX, drawY = player.y;
     ctx.save();
     ctx.translate(drawX, drawY+player.h/2);
     ctx.shadowColor = '#ff7a3c'; ctx.shadowBlur = 18;
