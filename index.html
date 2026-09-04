@@ -391,8 +391,14 @@
       yScalePhys = (floorY - ceilY) / (BASE_FLOOR - BASE_CEIL);
       playerScreenX = Math.round(LW * 0.20);
     } else {
+      // Paysage téléphone / desktop : playfield d'origine 900×400
       LW = BASE_LW; LH = BASE_LH; floorY = BASE_FLOOR; ceilY = BASE_CEIL;
       yScalePhys = 1; playerScreenX = 180;
+      // Ne pas garder l'immersif Flappy en paysage (casse le rendu historique)
+      if(immersiveFallback && !portrait){
+        immersiveFallback = false;
+        document.documentElement.classList.remove('immersive');
+      }
     }
   }
   function fitCanvas(){
@@ -405,6 +411,7 @@
     if(flappyPortrait){
       canvas.style.width = '100%';
       canvas.style.height = '100%';
+      canvas.style.position = '';
       const dpr = Math.min(window.devicePixelRatio || 1, 2.5);
       const bw = Math.max(2, Math.floor(vw * dpr));
       const bh = Math.max(2, Math.floor(vh * dpr));
@@ -415,15 +422,25 @@
       return;
     }
 
+    // Mode paysage (ou menu) : comportement initial — canvas 900×400 letterboxé
+    canvas.style.position = '';
+    canvas.style.left = '';
+    canvas.style.top = '';
+    canvas.style.right = '';
+    canvas.style.bottom = '';
+    canvas.style.maxWidth = '';
+    canvas.style.maxHeight = '';
     if(canvas.width !== BASE_LW || canvas.height !== BASE_LH){
       canvas.width = BASE_LW;
       canvas.height = BASE_LH;
     }
     let maxW, maxH;
     if(portrait){
+      // Menu portrait seulement (pas en partie — la partie portrait passe par flappyPortrait)
       maxW = vw * 0.96;
       maxH = vh * 0.34;
     } else {
+      // Paysage téléphone : comme avant
       maxW = vw * 0.98;
       maxH = vh * 0.92;
     }
@@ -431,11 +448,44 @@
     canvas.style.width = Math.floor(LW * scale) + 'px';
     canvas.style.height = Math.floor(LH * scale) + 'px';
   }
-  window.addEventListener('resize', fitCanvas);
-  window.addEventListener('orientationchange', ()=> setTimeout(fitCanvas, 120));
+  function isPortraitViewport(){
+    const vv = window.visualViewport;
+    const vw = (vv && vv.width) || window.innerWidth;
+    const vh = (vv && vv.height) || window.innerHeight;
+    return vh > vw;
+  }
+  function handleOrientationPlayfield(){
+    const prev = flappyPortrait;
+    fitCanvas();
+    // Changement portrait ↔ paysage en cours de partie : reconstruire le niveau
+    // (les Y du Flappy portrait ne sont pas compatibles avec le 900×400 paysage)
+    if(running && prev !== flappyPortrait){
+      const keepDeaths = deaths;
+      const keepScore = score;
+      const keepX = player.x;
+      const keepElapsed = elapsed;
+      const keepStart = startTime;
+      resetGame();
+      deaths = keepDeaths;
+      document.getElementById('deaths').textContent = '💀 '+deaths;
+      if(LEVELS[currentLevelId] && LEVELS[currentLevelId].arcade){
+        score = keepScore;
+        player.x = keepX;
+        camX = Math.max(0, keepX - playerScreenX);
+        elapsed = keepElapsed;
+        startTime = keepStart;
+        document.getElementById('scoreTag').textContent = 'SCORE '+score;
+      }
+      if(flappyPortrait && isMobileUi() && !fsElement()){
+        enableImmersiveFallback(true);
+      }
+    }
+  }
+  window.addEventListener('resize', handleOrientationPlayfield);
+  window.addEventListener('orientationchange', ()=> setTimeout(handleOrientationPlayfield, 160));
   if(window.visualViewport){
-    window.visualViewport.addEventListener('resize', fitCanvas);
-    window.visualViewport.addEventListener('scroll', fitCanvas);
+    window.visualViewport.addEventListener('resize', handleOrientationPlayfield);
+    window.visualViewport.addEventListener('scroll', ()=>{ syncVisualViewportCss(); if(flappyPortrait) fitCanvas(); });
   }
   fitCanvas();
 
@@ -1289,8 +1339,8 @@
     running = true;
     fitCanvas();
     Music.start(currentLevelId);
-    // Mobile Brave/iOS : immersif auto (l'API plein écran ne marche souvent pas)
-    if(isMobileUi() && !fsElement() && !immersiveFallback){
+    // Mobile : immersif auto UNIQUEMENT en portrait (paysage = comportement d'origine)
+    if(isMobileUi() && isPortraitViewport() && !fsElement() && !immersiveFallback){
       enableImmersiveFallback(true);
     }
     requestAnimationFrame(loop);
@@ -1494,7 +1544,10 @@
     syncVisualViewportCss();
     document.documentElement.classList.add('immersive');
     try{ window.scrollTo(0, 1); }catch(_){}
-    try{ if(screen.orientation && screen.orientation.lock) screen.orientation.lock('portrait').catch(()=>{}); }catch(_){}
+    // Ne forcer le verrouillage portrait que si on EST déjà en portrait
+    if(isPortraitViewport()){
+      try{ if(screen.orientation && screen.orientation.lock) screen.orientation.lock('portrait').catch(()=>{}); }catch(_){}
+    }
     if(!quiet){
       const toast = document.getElementById('recordToast');
       if(toast){
@@ -1540,10 +1593,9 @@
       return false;
     }
 
-    // Téléphone / Brave mobile : l'API plein écran est souvent refusée → immersif direct
-    if(isMobileUi()){
+    // Téléphone portrait : immersif direct. Paysage : tenter l'API, sinon letterbox classique.
+    if(isMobileUi() && isPortraitViewport()){
       enableImmersiveFallback(false);
-      // Tentative API en parallèle (Android Brave parfois OK)
       const el = document.documentElement;
       const req = el.requestFullscreen || el.webkitRequestFullscreen;
       if(req){
