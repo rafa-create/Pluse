@@ -136,13 +136,29 @@
   .scoreRowTop .scoreVal{color:var(--gold-bright);}
   .scoreDate{font-size:11px; color:var(--parchment-dark); opacity:0.75;}
 
-  #rotateHint{
-    display:none; position:absolute; inset:0; z-index:30; align-items:center; justify-content:center;
-    flex-direction:column; gap:12px; text-align:center; padding:24px;
-    background:rgba(2,5,6,0.92); color:var(--parchment); pointer-events:none;
+  #rotateHint{ display:none !important; }
+
+  #touchPad{
+    display:none; width:min(96vw,520px); flex:1 1 auto; min-height:120px; max-height:42vh;
+    margin: 10px auto 0; border-radius:18px; align-items:center; justify-content:center;
+    flex-direction:column; gap:6px; user-select:none; -webkit-user-select:none; touch-action:none;
+    border:2px solid rgba(61,255,160,0.45);
+    background:
+      radial-gradient(ellipse at 50% 30%, rgba(61,255,160,0.18), transparent 60%),
+      linear-gradient(180deg, rgba(18,50,48,0.55), rgba(4,12,11,0.85));
+    box-shadow: inset 0 0 24px rgba(0,0,0,0.45), 0 0 22px rgba(61,255,160,0.18);
+    color: var(--moss-bright); font-size:clamp(14px,4vw,18px); letter-spacing:1px;
+    text-shadow:0 0 10px rgba(61,255,160,0.55);
   }
-  #rotateHint .rotIcon{font-size:42px; animation:tiltPhone 1.4s ease-in-out infinite;}
-  @keyframes tiltPhone{ 0%,100%{ transform:rotate(0deg); } 40%{ transform:rotate(90deg); } 60%{ transform:rotate(90deg); } }
+  #touchPad .padHint{ font-size:clamp(11px,3vw,13px); color:var(--parchment-dark); }
+  #touchPad.held{
+    border-color: rgba(157,255,206,0.85);
+    background:
+      radial-gradient(ellipse at 50% 35%, rgba(61,255,160,0.35), transparent 65%),
+      linear-gradient(180deg, rgba(30,90,70,0.7), rgba(6,20,16,0.9));
+    box-shadow: inset 0 0 28px rgba(61,255,160,0.2), 0 0 28px rgba(61,255,160,0.35);
+    transform: scale(0.985);
+  }
 
   @media (max-width: 720px){
     canvas{ border-width:3px; outline-offset:-5px; border-radius:4px; }
@@ -159,14 +175,41 @@
     .lvlBtn{ width:min(100%, 320px); }
     .desktopOnly{ display:none !important; }
   }
-  @media (max-width: 720px) and (orientation: portrait){
-    #rotateHint.showOnPortrait{ display:flex; }
+  /* Layout vertical dédié pendant une partie */
+  @media (max-width: 900px) and (orientation: portrait){
+    #game.playingPortrait{
+      flex-direction:column; justify-content:flex-start; align-items:center;
+      padding-top: calc(56px + var(--safe-top));
+      padding-bottom: max(12px, var(--safe-bottom));
+      gap: 8px;
+    }
+    #game.playingPortrait canvas{
+      width: min(100%, 100dvw) !important;
+      height: auto !important;
+      max-height: 38dvh;
+      flex: 0 0 auto;
+    }
+    #game.playingPortrait #hud{
+      position:absolute; top:calc(8px + var(--safe-top));
+      width: calc(100% - 56px); left: 8px; transform:none; padding:0 40px 0 4px;
+      display:grid; grid-template-columns: 1fr auto; grid-template-rows: auto auto; gap:4px 8px;
+    }
+    #game.playingPortrait #hudLeft{ grid-column:1; grid-row:1; }
+    #game.playingPortrait #levelName{ grid-column:2; grid-row:1; text-align:right; }
+    #game.playingPortrait #progressWrap{ grid-column:1 / -1; grid-row:2; margin:0; }
+    #game.playingPortrait #statusTag{ display:none; }
+    #game.playingPortrait #touchPad{ display:flex; width:calc(100% - 20px); }
+    #game.playingPortrait #recordToast{ top: calc(78px + var(--safe-top)); }
   }
 </style>
 </head>
 <body>
 <div id="game">
   <canvas id="c" width="900" height="400"></canvas>
+  <div id="touchPad" aria-label="Zone de vol">
+    <div>⬆ MAINTIENS POUR VOLER</div>
+    <div class="padHint">Relâche pour plonger</div>
+  </div>
   <div id="deathFlash"></div>
 
   <button id="quitBtn" class="hidden" title="Retour au menu">✕</button>
@@ -192,7 +235,7 @@
       <span><b>Maintien</b> → le dragon s'élève</span>
       <span><b>Relâche</b> → le dragon plonge</span>
       <span class="desktopOnly">Les murailles sont mortelles, le sol et les voûtes sont sûrs (on peut y glisser)</span>
-      <span><b>Téléphone</b> → tourne en paysage, appuie et maintiens n'importe où</span>
+      <span><b>Téléphone</b> → portrait OK : maintiens la zone basse (ou l'écran)</span>
     </div>
 
     <div class="legend">
@@ -258,12 +301,6 @@
       <button class="btn secondary" id="menuBtn">GRIMOIRE</button>
     </div>
   </div>
-
-  <div id="rotateHint">
-    <div class="rotIcon">📱</div>
-    <div class="title" style="font-size:clamp(16px,5vw,26px)">TOURNE TON TÉLÉPHONE</div>
-    <div class="subtitle">Le jeu se joue mieux en mode paysage.</div>
-  </div>
 </div>
 
 <script>
@@ -279,22 +316,26 @@
     const vw = (vv && vv.width) || window.innerWidth;
     const vh = (vv && vv.height) || window.innerHeight;
     const portrait = vh > vw;
-    // Sur téléphone : maximiser la largeur ; laisser un peu de place au HUD
-    const maxW = portrait ? vw * 0.98 : vw * 0.98;
-    const maxH = portrait ? vh * 0.42 : vh * 0.92;
-    const scale = Math.min(maxW / LW, maxH / LH, 2);
-    canvas.style.width = Math.floor(LW * scale) + 'px';
-    canvas.style.height = Math.floor(LH * scale) + 'px';
-    updateRotateHint();
-  }
-  function updateRotateHint(){
-    const hint = document.getElementById('rotateHint');
-    if(!hint) return;
     const playing = !document.getElementById('hud').classList.contains('hidden')
       && document.getElementById('winScreen').classList.contains('hidden');
-    const portrait = window.innerHeight > window.innerWidth;
-    const narrow = Math.min(window.innerWidth, window.innerHeight) < 720;
-    hint.classList.toggle('showOnPortrait', playing && portrait && narrow);
+    const gameRoot = document.getElementById('game');
+    gameRoot.classList.toggle('playingPortrait', playing && portrait);
+
+    let maxW, maxH;
+    if(playing && portrait){
+      // Plein largeur, place réservée HUD + pad tactile
+      maxW = vw * 0.98;
+      maxH = Math.min(vh * 0.36, maxW * (LH / LW));
+    } else if(portrait){
+      maxW = vw * 0.96;
+      maxH = vh * 0.28;
+    } else {
+      maxW = vw * 0.98;
+      maxH = vh * 0.92;
+    }
+    const scale = Math.min(maxW / LW, maxH / LH, 2.2);
+    canvas.style.width = Math.floor(LW * scale) + 'px';
+    canvas.style.height = Math.floor(LH * scale) + 'px';
   }
   window.addEventListener('resize', fitCanvas);
   window.addEventListener('orientationchange', ()=> setTimeout(fitCanvas, 120));
@@ -966,7 +1007,7 @@
     if(lastMenuScreen==='storyScreen') renderStoryGrid();
     updateArcadeBestUI();
     showMenu();
-    updateRotateHint();
+    fitCanvas();
   }
 
   function renderStoryGrid(){
@@ -994,7 +1035,6 @@
     resetGame();
     running = true;
     fitCanvas();
-    updateRotateHint();
     requestAnimationFrame(loop);
   }
 
@@ -1083,12 +1123,24 @@
     document.getElementById('winBestLine').classList.toggle('hidden', best<=0);
     document.getElementById('winBest').textContent = best.toFixed(2)+'s';
     document.getElementById('winScreen').classList.remove('hidden');
-    updateRotateHint();
+    fitCanvas();
   }
 
   // ---------- INPUT : maintien = propulsion continue ----------
-  function pressInput(){ if(inputHeld) return; inputHeld = true; }
-  function releaseInput(){ if(!inputHeld) return; inputHeld = false; }
+  const touchPad = document.getElementById('touchPad');
+  function syncPadVisual(){
+    touchPad.classList.toggle('held', !!inputHeld);
+  }
+  function pressInput(){
+    if(inputHeld) return;
+    inputHeld = true;
+    syncPadVisual();
+  }
+  function releaseInput(){
+    if(!inputHeld) return;
+    inputHeld = false;
+    syncPadVisual();
+  }
 
   function isGameplayActive(){
     return !document.getElementById('hud').classList.contains('hidden')
